@@ -1,0 +1,137 @@
+format ELF64
+section '.text' executable
+public _start
+
+extrn InitWindow
+extrn WindowShouldClose
+extrn CloseWindow
+extrn DrawRectangle
+extrn DrawCircle
+extrn BeginDrawing
+extrn EndDrawing
+extrn ClearBackground
+extrn GetFrameTime
+extrn SetTargetFPS
+extrn IsKeyPressed
+
+extrn _exit
+
+KEY_SPACE = 32
+
+startx = 300
+starty = 300
+startvelx = -20
+startvely = -20
+
+width = 50
+height = 50
+
+floor = 700
+right_wall = 1200
+
+_start:
+; init data
+  mov [pos.x], dword startx    ; posx
+  mov [pos.y], dword starty    ; posy
+  mov [vel.x], dword startvelx ; velx
+  mov [vel.y], dword startvely ; vely
+
+; init window
+  mov rdi, right_wall
+  mov rsi, floor
+  mov rdx, title
+  call InitWindow
+
+  mov rdi, 60
+  call SetTargetFPS
+
+.again: ; main game loop
+  call WindowShouldClose
+  cmp rax, 0
+  jne .over
+
+  call BeginDrawing
+
+  mov rdi, 0
+  call ClearBackground
+
+  ; draw player
+  mov edi, [pos.x] ; set posx
+  mov esi, [pos.y] ; set posy
+  mov rcx, width
+  mov rdx, height
+  mov r8, 0FFFFFFFFh
+  call DrawRectangle
+
+  call EndDrawing
+
+  add [vel.y], dword 1 ; update vely
+
+  mov rdi, KEY_SPACE
+  call IsKeyPressed
+  cmp rax, 0
+  je .not_pressed
+  add [vel.y], dword -10 ; jump
+
+.not_pressed:
+
+  mov eax, dword [vel.x]
+  add [pos.x], eax ; update x
+  mov eax, dword [vel.y]
+  add [pos.y], eax ; update y
+
+  cmp dword [pos.y], floor - height
+  jl .not_floor
+.floor:
+  mov dword [pos.y], floor - height
+  mov eax, -1
+  imul dword [vel.y]
+  mov dword [vel.y], eax
+.not_floor:
+
+   cmp dword [pos.x], right_wall - width
+   jl .not_wall_right
+.wall_right:
+  mov dword [pos.x], right_wall - width
+  mov eax, -1
+  imul dword [vel.x]
+  mov dword [vel.x], eax
+.not_wall_right:
+
+
+  cmp dword [pos.y], 0
+  jg .not_ceil
+.ceil:
+  mov dword [pos.y], 0
+  mov eax, -1
+  imul dword [vel.y]
+  mov dword [vel.y], eax
+.not_ceil:
+
+   cmp dword [pos.x], 0
+   jg .not_wall_left
+.wall_left:
+  mov dword [pos.x], 0
+  mov eax, -1
+  imul dword [vel.x]
+  mov dword [vel.x], eax
+.not_wall_left:
+
+
+
+  jmp .again
+.over:
+
+  call CloseWindow
+  mov rdi, 0
+  call _exit
+
+section '.data' writeable
+title: db "Fasm Raylib", 0
+pos:
+.x: dd 0
+.y: dd 0
+
+vel:
+.x: dd 0
+.y: dd 0
