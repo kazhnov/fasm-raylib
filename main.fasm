@@ -6,7 +6,9 @@ extrn InitWindow
 extrn WindowShouldClose
 extrn CloseWindow
 extrn DrawRectangle
+extrn DrawRectangleV
 extrn DrawCircle
+extrn DrawCircleV
 extrn BeginDrawing
 extrn EndDrawing
 extrn ClearBackground
@@ -14,114 +16,164 @@ extrn GetFrameTime
 extrn SetTargetFPS
 extrn IsKeyPressed
 
+extrn Vector2Distance
+extrn Vector2Length
+extrn Vector2Normalize
+extrn Vector2Subtract
+extrn Vector2Scale
+extrn Vector2DotProduct
+
 extrn _exit
+
+macro doftoeax first, second, oper {
+  mov eax, first
+  movd xmm0, eax
+  mov eax, second
+  movd xmm1, eax
+  oper xmm0, xmm1
+  movd eax, xmm0
+}
+
+macro addfaddr dest, num {
+  mov [tempf], dword num
+  movss xmm0, dword dest
+  movss xmm1, dword [tempf]
+  addss xmm0, xmm1
+  movss dest, xmm0
+}
+
+macro mullfaddr dest, num {
+  mov [tempf], dword num
+  movss xmm0, dword dest
+  movss xmm1, dword [tempf]
+  mulss xmm0, xmm1
+  movss dest, xmm0
+}
+
+macro cmpfaddr dest, num {
+  mov [tempf], dword num
+  movss xmm0, dword dest
+  movss xmm1, dword [tempf]
+  ucomiss xmm0, xmm1
+}
 
 KEY_SPACE = 32
 
-startx = 300
-starty = 300
-startvelx = -20
-startvely = -20
+width = dword 50.0f
+height = dword 50.0f
 
-width = 50
-height = 50
-
-floor = 700
-right_wall = 1200
+floor = dword 720.0f
+right_wall = dword 1280.0f
 
 _start:
-; init data
-  mov [pos.x], dword startx    ; posx
-  mov [pos.y], dword starty    ; posy
-  mov [vel.x], dword startvelx ; velx
-  mov [vel.y], dword startvely ; vely
-
 ; init window
-  mov rdi, right_wall
-  mov rsi, floor
+  mov rdi, 1280
+  mov rsi, 720
   mov rdx, title
   call InitWindow
 
   mov rdi, 60
   call SetTargetFPS
 
+; update center
+  mov eax, 1280.0f
+  mov ebx, 2.0f
+  doftoeax eax, ebx, divss
+  mov [center.x], eax
+  mov [pos.x], eax
+
+  mov eax, 720.0f
+  mov ebx, 2.0f
+  doftoeax eax, ebx, divss
+  mov [center.y], eax
+  mov [pos.y], eax
+
 .again: ; main game loop
   call WindowShouldClose
   cmp rax, 0
   jne .over
 
+  call GetFrameTime ; Update dt
+  movd [delta_time], xmm0
+
   call BeginDrawing
 
-  mov rdi, 0
+  mov rdi, 0xFFFFFFFF
   call ClearBackground
 
-  ; draw player
-  mov edi, [pos.x] ; set posx
-  mov esi, [pos.y] ; set posy
-  mov rcx, width
-  mov rdx, height
-  mov r8, 0FFFFFFFFh
-  call DrawRectangle
+  movsd xmm0, [center]
+  movss xmm1, [radius]
+  mov rdi, 0xFF000000
+  call DrawCircleV
 
+  doftoeax [delta_time], [gravity], mulss
+  addfaddr [vel.y], eax
+
+; check boundary
+  movq xmm0, [pos]
+  movq xmm1, [center]
+  call Vector2Distance
+  addss xmm0, [size.x]
+  movss xmm1, [radius]
+  vsubss xmm2, xmm0, xmm1
+  movd [offset], xmm2
+  ucomiss xmm0, xmm1
+
+  jb .not_up
+.up:
+  movq xmm0, [pos]
+  movq xmm1, [center]
+  call Vector2Subtract
+  call Vector2Normalize
+  movq [normal], xmm0   ; set normal
+
+  movq xmm1, [vel]
+  call Vector2DotProduct; xmm0 dot
+
+; vel = vel - 2*dot*norm
+  pxor xmm1, xmm1
+  pxor xmm2, xmm2
+  movss xmm1, xmm0    ; xmm1 dot
+  movq xmm0, [normal] ; xmm0 norm
+  mov [tempf], dword 2.0
+  movd xmm2, [tempf]
+  mulss xmm1, xmm2    ; xmm1 dot*2
+  call Vector2Scale
+
+  movq xmm1, xmm0
+  movq xmm0, [vel]   ; xmm1 vel
+  call Vector2Subtract
+
+  movd xmm1, [coefficient]  ; apply loss of momentum
+  call Vector2Scale
+
+  movq [vel], xmm0   ; update velocity
+
+  movq xmm0, [normal]
+  movd xmm1, [offset]
+  call Vector2Scale
+  movsd xmm1, xmm0 ; xmm1 norm*offset
+  movq xmm0, [pos]
+  call Vector2Subtract
+  movq [pos], xmm0 ; update pos
+
+.not_up:
+
+  mov eax, [vel.x]
+  addfaddr [pos.x], eax
+  mov eax, [vel.y]
+  addfaddr [pos.y], eax
+
+  ; draw player
+  movsd xmm0, [pos]
+  movss xmm1, [size.x]
+  mov rdi, 0xFFFFFFFF
+  call DrawCircleV
   call EndDrawing
 
-  add [vel.y], dword 1 ; update vely
-
-  mov rdi, KEY_SPACE
-  call IsKeyPressed
-  cmp rax, 0
-  je .not_pressed
-  add [vel.y], dword -10 ; jump
-
-.not_pressed:
-
-  mov eax, dword [vel.x]
-  add [pos.x], eax ; update x
-  mov eax, dword [vel.y]
-  add [pos.y], eax ; update y
-
-  cmp dword [pos.y], floor - height
-  jl .not_floor
-.floor:
-  mov dword [pos.y], floor - height
-  mov eax, -1
-  imul dword [vel.y]
-  mov dword [vel.y], eax
-.not_floor:
-
-   cmp dword [pos.x], right_wall - width
-   jl .not_wall_right
-.wall_right:
-  mov dword [pos.x], right_wall - width
-  mov eax, -1
-  imul dword [vel.x]
-  mov dword [vel.x], eax
-.not_wall_right:
-
-
-  cmp dword [pos.y], 0
-  jg .not_ceil
-.ceil:
-  mov dword [pos.y], 0
-  mov eax, -1
-  imul dword [vel.y]
-  mov dword [vel.y], eax
-.not_ceil:
-
-   cmp dword [pos.x], 0
-   jg .not_wall_left
-.wall_left:
-  mov dword [pos.x], 0
-  mov eax, -1
-  imul dword [vel.x]
-  mov dword [vel.x], eax
-.not_wall_left:
-
-
-
   jmp .again
-.over:
 
+.over:
   call CloseWindow
   mov rdi, 0
   call _exit
@@ -129,9 +181,34 @@ _start:
 section '.data' writeable
 title: db "Fasm Raylib", 0
 pos:
-.x: dd 0
-.y: dd 0
+.x: dd 0.0
+.y: dd 0.0
 
 vel:
-.x: dd 0
-.y: dd 0
+.x: dd 100.0
+.y: dd 0.0
+
+size:
+.x: dd 20.0
+
+tempf: dd 0
+
+offset: dd 0
+
+tempv: dq 0
+
+delta_time: dd 0
+
+gravity: dd 100.0
+
+center:
+.x: dd 0.0
+.y: dd 0.0
+
+normal:
+.x: dd 0.0
+.y: dd 0.0
+
+radius: dd 300.0
+
+coefficient: dd 0.8
